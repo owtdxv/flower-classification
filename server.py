@@ -15,8 +15,8 @@ model = tf.saved_model.load('./model_512x512')
 label = './label.xlsx'
 df = pd.read_excel(label)
 
-# 서버 설정 (only local)
-SERVER_IP = '127.0.0.1'
+# 서버 설정
+SERVER_IP = '0.0.0.0'
 SERVER_PORT = 8080
 SERVER_ADDR = (SERVER_IP, SERVER_PORT)
 
@@ -24,6 +24,7 @@ class Server:
     def __init__(self, root) -> None:
         self.root = root
         self.ui = self.initialize_ui(self.root, self.stop_server)
+        self.root.protocol("WM_DELETE_WINDOW", self.stop_server)
 
         # 서버 & 스레드 초기화
         self.server_socket = None
@@ -94,7 +95,25 @@ class Server:
     # 클라이언트 처리
     def handle_client(self, client_socket: socket.socket, client_addr: tuple) -> None:
         try:
-            self.display_msg(f'처리 함수 실행됨!', 'msg')
+            self.display_msg(f'클라이언트 처리 시작: {client_addr}', 'msg')
+            
+            # 데이터 크기 먼저 수신
+            data_size = int.from_bytes(client_socket.recv(8), 'big')
+            received_data = b''
+            
+            # 데이터 수신
+            while len(received_data) < data_size:
+                chunk = client_socket.recv(1024)
+                if not chunk:
+                    break
+                received_data += chunk
+            
+            self.display_msg(f'수신된 데이터 크기: {len(received_data)} bytes', 'msg')
+            
+            # 클라이언트에 응답 전송
+            response_message = f'서버에서 {len(received_data)} bytes 데이터를 받았습니다.'
+            client_socket.sendall(response_message.encode('utf-8'))
+            self.display_msg(f'응답 전송 완료: {client_addr}', 'msg')
 
         except Exception as e:
             self.display_msg(f'처리 함수 실행중 오류!', 'error')
