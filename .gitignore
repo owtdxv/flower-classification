@@ -1,0 +1,41 @@
+# Python 캐시 파일 및 디렉터리
+__pycache__/
+*.py[cod]
+
+# Docker 관련 파일
+*.pid
+*.log
+*.db
+docker-compose.override.yml
+
+# XQuartz 및 Unix 소켓 관련 파일
+/tmp/.X11-unix/
+
+# 운영체제별 캐시 파일
+.DS_Store
+Thumbs.db
+
+# IDE 및 에디터 설정 파일
+.vscode/
+.idea/
+*.swp
+
+# 바이너리 및 컴파일된 파일
+*.o
+*.so
+*.dll
+*.exe
+
+# 테스트 결과물
+.coverage
+*.test_report.xml
+.pytest_cache/
+
+# 로그 파일
+*.log
+logs/
+
+# 기타 불필요한 파일
+*.bak
+*.tmp
+*.old

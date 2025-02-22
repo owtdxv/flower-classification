@@ -1,0 +1,28 @@
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - DISPLAY=host.docker.internal:0 # GUI연결
+      - QT_X11_NO_MITSHM=1 # 공유 메모리 문제 방지
+    command: python server.py
+    volumes:
+      - .:/app
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    ports:
+      - "8080:8080"
+
+  client:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - DISPLAY=host.docker.internal:0 # GUI연결
+      - QT_X11_NO_MITSHM=1 # 공유 메모리 문제 방지
+    command: python client.py
+    volumes:
+      - .:/app
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    depends_on:
+      - server # 반드시 서버 켜지고 나면 실행
