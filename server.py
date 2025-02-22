@@ -10,11 +10,6 @@ from io import BytesIO
 from PIL import Image, ImageTk, ImageFile
 import datetime
 
-# 사전에 학습한 모델+라벨을 불러오기
-model = tf.saved_model.load('./model_512x512')
-label = './label.xlsx'
-df = pd.read_excel(label)
-
 # 서버 설정
 SERVER_IP = '0.0.0.0'
 SERVER_PORT = 8080
@@ -31,6 +26,15 @@ class Server:
         self.client_threads = []
         self.client_sockets = []
         self.running = False
+
+        # 사전 학습된 모델과 라벨 파일 로드
+        try:
+            self.model = tf.saved_model.load('./model_512x512')
+            self.df = pd.read_excel('./label.xlsx')  # 라벨 파일 경로 (컬럼: 'en_class', 'ko_class')
+            self.infer = self.model.signatures['serving_default']
+            self.display_msg("모델 및 라벨 로드 성공", "msg")
+        except Exception as e:
+            self.display_msg(f"모델 또는 라벨 로드 실패: {str(e)}", "error")
 
         # 서버 실행
         self.start_server()
@@ -92,53 +96,90 @@ class Server:
                 if self.running:
                     self.display_msg(f'클라이언트 연결 중 오류: {str(e)}', 'error')
     
+    # 이미지 전처리: 이미지를 numpy 배열로 변환
+    def preprocess_image(self, image: Image.Image) -> np.ndarray:
+        if image.mode == 'RGBA':
+            image = image.convert('RGB')
+        image = image.resize((299, 299))
+        arr = np.array(image) / 255.0
+        arr = np.expand_dims(arr, axis=0)
+        return arr
+    
+    # 이미지 분류 함수: 전처리 후 모델을 통해 예측값 반환
+    def classify_image(self, image: Image.Image) -> np.ndarray:
+        preprocessed_image = self.preprocess_image(image)
+        input_tensor = tf.convert_to_tensor(preprocessed_image, dtype=tf.float32)
+        prediction = self.infer(input_tensor)
+        output_key = list(self.infer.structured_outputs.keys())[0]
+        return prediction[output_key].numpy()
+    
+    # 예측된 인덱스에 따른 꽃 이름 반환 (영문, 한글)
+    def get_flower_names_by_index(self, index: int):
+        return (self.df.iloc[index]['en_class'], self.df.iloc[index]['ko_class'])
+    
     # 클라이언트 처리
     def handle_client(self, client_socket: socket.socket, client_addr: tuple) -> None:
         try:
             self.display_msg(f'클라이언트 처리 시작: {client_addr}', 'msg')
             
-            # 데이터 크기 먼저 수신
-            data_size = int.from_bytes(client_socket.recv(8), 'big')
-            received_data = b''
+            # 8바이트로 데이터 크기 수신
+            data_size_bytes = client_socket.recv(8)
+            if not data_size_bytes:
+                self.display_msg("데이터 크기 수신 실패", "error")
+                return
+            expected_size = int.from_bytes(data_size_bytes, 'big')
+            self.display_msg(f'예상 데이터 크기: {expected_size} bytes', 'msg')
             
-            # 데이터 수신
-            while len(received_data) < data_size:
+            # 실제 데이터 수신
+            received_data = b''
+            while len(received_data) < expected_size:
                 chunk = client_socket.recv(1024)
                 if not chunk:
                     break
                 received_data += chunk
-            
             self.display_msg(f'수신된 데이터 크기: {len(received_data)} bytes', 'msg')
             
-            # 클라이언트에 응답 전송
-            response_message = f'서버에서 {len(received_data)} bytes 데이터를 받았습니다.'
-            client_socket.sendall(response_message.encode('utf-8'))
-            self.display_msg(f'응답 전송 완료: {client_addr}', 'msg')
+            if len(received_data) != expected_size:
+                self.display_msg("수신 데이터 크기가 예상과 다릅니다.", "error")
+                return
 
+            # 수신한 데이터를 이미지로 변환
+            try:
+                image = Image.open(BytesIO(received_data))
+                self.display_msg("이미지 로드 성공", "msg")
+            except Exception as e:
+                self.display_msg(f"이미지 로드 실패: {str(e)}", "error")
+                return
+            
+            # 이미지 분류 수행
+            try:
+                prediction = self.classify_image(image)
+                predicted_class_idx = np.argmax(prediction[0])
+                self.display_msg(f'예측 결과: {prediction}', 'msg')
+                self.display_msg(f'예측 인덱스: {predicted_class_idx}', 'msg')
+                en_label, ko_label = self.get_flower_names_by_index(predicted_class_idx)
+                result = f'이 꽃은 {ko_label}({en_label})인 것 같아요!'
+                self.display_msg(f'분류 결과: {result}', 'msg')
+            except Exception as e:
+                self.display_msg(f'이미지 분류 실패: {str(e)}', 'error')
+                result = "이미지 분류에 실패했습니다."
+            
+            # 클라이언트에 결과 전송
+            client_socket.sendall(result.encode('utf-8'))
         except Exception as e:
-            self.display_msg(f'처리 함수 실행중 오류!', 'error')
-        
+            self.display_msg(f'처리 중 오류 발생: {str(e)}', 'error')
         finally:
-            # 소켓 닫기 (연결 해제)
             try:
                 client_socket.close()
             except Exception as e:
-                self.display_msg(f'연결 해제 오류: {str(e)}', 'error')
-            
-            # 소켓, 스레드 제거
+                self.display_msg(f'클라이언트 소켓 닫기 실패: {str(e)}', 'error')
             if client_socket in self.client_sockets:
-                try:
-                    self.client_sockets.remove(client_socket)
-                except ValueError:
-                    self.display_msg(f'이미 제거된 소켓입니다: {client_addr}', 'error')
-            
+                self.client_sockets.remove(client_socket)
+                
             current_thread = threading.current_thread()
             if current_thread in self.client_threads:
-                try:
-                    self.client_threads.remove(current_thread)
-                except ValueError:
-                    self.display_msg(f'이미 제거된 스레드입니다: {current_thread.name}', 'error');
-            self.display_msg(f'클라이언트 연결 해제됨: {client_addr}', 'msg')
+                self.client_threads.remove(current_thread)
+            self.display_msg(f'클라이언트 연결 종료됨: {client_addr}', 'msg')
             
             
     # Quit
