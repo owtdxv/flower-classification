@@ -39,3 +39,6 @@ logs/
 *.bak
 *.tmp
 *.old
+
+# 모델 (용량제한)
+model_512x512
